@@ -1,0 +1,50 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ICCT Prospectus Queue</title><style>
+:root{--bg:#eaf5ff;--p:#a8d8fa;--pd:#5fb0ee;--l:#d9eeff;--t:#12324d}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--t)}
+header{background:var(--p);color:var(--t);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+main{max-width:860px;margin:20px auto;padding:0 14px}.card{background:#fff;border-radius:12px;padding:18px;margin-bottom:16px;box-shadow:0 2px 8px #2f8fe022}
+input,select,button{font:inherit;padding:9px 12px;border-radius:8px;border:1px solid #9cc8ee;margin:4px 4px 4px 0}
+button{background:var(--p);color:var(--t);border:1px solid #7cc0f5;cursor:pointer;font-weight:600}button:hover{background:var(--pd)}button.s{background:#fff;color:var(--t)}
+.days{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin:10px 0}
+.day{border:2px solid var(--l);border-radius:10px;padding:8px;text-align:center;cursor:pointer;background:#f6fbff}.day.on{border-color:var(--p);background:var(--l)}.day.full{opacity:.45}
+.slip{border:2px dashed var(--p);border-radius:12px;padding:14px;background:#f2f9ff;margin-bottom:8px}.slip b.n{font-size:44px;color:#2b79b8;display:block}
+table{width:100%;border-collapse:collapse}td,th{padding:8px;border-bottom:1px solid var(--l);text-align:left}@media(max-width:600px){.pick{grid-template-columns:1fr!important}}.pick{display:grid;grid-template-columns:1fr 1fr;gap:14px}.role{border:2px solid var(--p);border-radius:14px;padding:26px 14px;background:#f2f9ff;cursor:pointer}.role:hover{background:var(--l)}.role h3{margin:8px 0}#msg{padding:10px;border-radius:8px;margin-bottom:12px;display:none}
+</style></head><body><header><b>ICCT Colleges · Prospectus Appointment &amp; Queue</b><span id=who></span></header>
+<main><div id=msg></div><div id=app></div></main><script>
+const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"]/g,c=>'&#'+c.charCodeAt(0)+';');
+let T=sessionStorage.t,U=JSON.parse(sessionStorage.u||'null'),sel={},resId=null;
+const REQ={get:'Form 137 and PSA birth certificate',update:'Current prospectus and SOG (Summary of Grades)'};
+async function api(p,m='GET',b){const r=await fetch('/api/'+p,{method:m,headers:{'Content-Type':'application/json',Authorization:T||''},body:b&&JSON.stringify(b)});const j=await r.json();if(!r.ok)throw j.error;return j}
+function say(t,ok){const m=$('#msg');m.textContent=t;m.style.display='block';m.style.background=ok?'#c5e5fc':'#eef7ff';m.style.border='1px solid #7cc0f5'}
+const go=async f=>{try{await f()}catch(e){say(e)}};
+function render(){$('#who').innerHTML=U?esc(U.name)+' ('+U.role+') <button class=s onclick="logout()">Log out</button>':'';
+ if(!U)return authView();go(U.role=='student'?studentView:staffView)}
+let AR=null;
+function authView(){
+ if(!AR){$('#app').innerHTML=`<div class=card style="text-align:center"><h2>Welcome! Who are you?</h2><p>Choose how you want to log in.</p><div class=pick><div class=role onclick="AR='student';authView()"><div style="font-size:48px">🎓</div><h3>Student</h3><small>Book an appointment and get your slot number</small></div><div class=role onclick="AR='admin';authView()"><div style="font-size:48px">🗂️</div><h3>Admin / Staff</h3><small>Manage the queue, slots, and reports</small></div></div></div>`;return}
+ const st=AR=='student';
+ $('#app').innerHTML=`<button class=s onclick="AR=null;authView()">← Back</button><div class=card><h3>${st?'Student':'Admin / Staff'} Log in</h3><input id=li placeholder="${st?'Student number':'Admin or staff ID'}"><br><input id=lp type=password placeholder=Password><br><button onclick="login()">Log in</button></div>`+
+ (st?`<div class=card><h3>New student? Register</h3><input id=rs placeholder="Student number"><input id=rn placeholder="Full name"><br><input id=re placeholder=Email><input id=rp type=password placeholder="Password (min 6)"><br><button onclick="reg()">Register</button></div>`:'')}
+const login=()=>go(async()=>{const r=await api('login','POST',{id:$('#li').value,password:$('#lp').value});if((AR=='student')!=(r.user.role=='student'))throw AR=='student'?'This is an Admin/Staff account. Go back and choose Admin / Staff.':'This is a Student account. Go back and choose Student.';T=r.token;U=r.user;sessionStorage.t=T;sessionStorage.u=JSON.stringify(U);$('#msg').style.display='none';render()});
+const reg=()=>go(async()=>{await api('register','POST',{student_no:$('#rs').value,name:$('#rn').value,email:$('#re').value,password:$('#rp').value});say('Registered! You can now log in.',1)});
+const logout=()=>{sessionStorage.clear();T=U=AR=null;render()};
+async function studentView(){const[s,my]=await Promise.all([api('slots'),api('my')]),act=my.find(a=>a.status=='booked');sel={};
+ $('#app').innerHTML=(act?`<div class=card><h3>Your appointment slip</h3><div class=slip><b class=n>#${act.serial}</b>${esc(U.name)} · ${esc(U.login)}<br>${act.d} at ${act.t} · ${act.type=='get'?'Get':'Update'} prospectus<br><small>Bring: ${REQ[act.type]}</small></div><button class=s onclick="resId=${act.id};render()">Reschedule</button><button class=s onclick="cancel(${act.id})">Cancel</button></div>`:'')+
+ (!act||resId?`<div class=card><h3>${resId?'Pick a new date':'Book an appointment'}</h3>${resId?'':`<select id=ty onchange="rq()"><option value=get>Get an academic prospectus</option><option value=update>Update an academic prospectus</option></select><p id=rq></p>`}
+ <div class=days>${s.days.map(d=>`<div class="day ${d.left?'':'full'}" onclick="pick('${d.d}',${d.left},this)"><b>${d.d.slice(5)}</b><br>${d.left?d.left+' slots left':'FULL'}</div>`).join('')}</div>
+ <select id=tm>${s.times.map(t=>`<option>${t}</option>`).join('')}</select><button onclick="doBook()">Confirm</button></div>`:'')+
+ `<div class=card><h3>History</h3><table>${my.map(a=>`<tr><td>#${a.serial}<td>${a.d} ${a.t}<td>${a.type}<td>${a.status}</tr>`).join('')||'<tr><td>No appointments yet.'}</table></div>`;if($('#rq'))rq()}
+const rq=()=>$('#rq').textContent='Bring: '+REQ[$('#ty').value];
+function pick(d,left,el){if(!left)return say('That date is already full. Please choose another date.');sel.d=d;document.querySelectorAll('.day').forEach(x=>x.classList.remove('on'));el.classList.add('on')}
+const doBook=()=>go(async()=>{if(!sel.d)throw 'Please pick a date first.';const b={date:sel.d,time:$('#tm').value,type:resId?'':$('#ty').value};
+ const r=await api(resId?'reschedule/'+resId:'book','POST',b);resId=null;say('Booked! Your slot number is #'+r.serial+'. A confirmation email was sent.',1);studentView()});
+const cancel=id=>go(async()=>{if(!confirm('Cancel this appointment?'))return;await api('cancel/'+id,'POST');say('Appointment cancelled.',1);studentView()});
+async function staffView(){$('#app').innerHTML=`<div class=card><h3>Daily queue</h3><input type=date id=qd value="${new Date().toLocaleDateString('en-CA')}" onchange="loadQ()"><div id=ql></div></div>`+
+ (U.role=='admin'?`<div class=card><h3>Slot limit per day</h3><input type=date id=sd><input id=sm type=number placeholder="Max slots (0 = closed)"><button onclick="setS()">Save</button></div><div class=card><h3>Reports</h3><div id=rp></div></div><div class=card><h3>Add staff account</h3><input id=nl placeholder=Login><input id=nn placeholder=Name><input id=np type=password placeholder=Password><button onclick="addStaff()">Create</button></div>`:'');
+ loadQ();if(U.role=='admin')loadRep()}
+const loadQ=()=>go(async()=>{const r=await api('queue?date='+$('#qd').value);$('#ql').innerHTML=r.length?`<table><tr><th>#<th>Time<th>Student<th>Request<th>Status<th></tr>${r.map(a=>`<tr><td><b>${a.serial}</b><td>${a.t}<td>${esc(a.name)}<br><small>${esc(a.login)}</small><td>${a.type}<td>${a.status}<td>${a.status=='booked'?['served','missed','rescheduled'].map(s=>`<button class=s onclick="st(${a.id},'${s}')">${s}</button>`).join(''):''}</tr>`).join('')}</table>`:'<p>No appointments for this date.</p>'});
+const st=(id,s)=>go(async()=>{await api('status/'+id,'POST',{status:s});loadQ()});
+const loadRep=()=>go(async()=>{const r=await api('report');$('#rp').innerHTML=`<table><tr><th>Date<th>Total<th>Served<th>Missed<th>Cancelled</tr>${r.map(x=>`<tr><td>${x.d}<td>${x.total}<td>${x.served}<td>${x.missed}<td>${x.cancelled}</tr>`).join('')}</table>`});
+const setS=()=>go(async()=>{await api('schedule','POST',{date:$('#sd').value,max:$('#sm').value});say('Slot limit saved.',1)});
+const addStaff=()=>go(async()=>{await api('staff','POST',{login:$('#nl').value,name:$('#nn').value,password:$('#np').value});say('Staff account created.',1)});
+render();</script></body></html>
