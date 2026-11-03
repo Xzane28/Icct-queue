@@ -1,0 +1,74 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel=icon href=/logo.png><title>ICCT Prospectus Queue</title><style>
+ body{background:linear-gradient(rgba(190,225,252,.5),rgba(190,225,252,.72)),url(/campus.jpg) center/cover fixed !important}
+:root{--bg:#eaf5ff;--p:#a8d8fa;--pd:#5fb0ee;--l:#d9eeff;--t:#12324d}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--t);min-height:100vh}
+body.auth{background:linear-gradient(rgba(190,225,252,.5),rgba(190,225,252,.72)),url(/campus.jpg) center/cover fixed}
+.lg{height:32px;width:32px;vertical-align:middle;margin-right:8px}header{background:var(--p);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+main{max-width:860px;margin:20px auto;padding:0 14px}.card{background:rgba(255,255,255,.95);border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 4px 14px #2f8fe033}
+input,select,button{font:inherit;padding:9px 12px;border-radius:8px;border:1px solid #9cc8ee;margin:4px 4px 4px 0}
+button{background:var(--p);color:var(--t);border:1px solid #7cc0f5;cursor:pointer;font-weight:600}button:hover{background:var(--pd)}button.s{background:#fff}
+a{color:#2b79b8}.hero{text-align:center}.hero h1{margin:6px 0;font-size:26px}
+.pick{display:grid;grid-template-columns:1fr 1fr;gap:14px}.role{border:2px solid var(--p);border-radius:14px;padding:26px 14px;background:#f2f9ff;cursor:pointer}.role:hover{background:var(--l)}.role h3{margin:8px 0}
+.field{position:relative;display:block;margin:8px 0}.field input{width:100%;margin:0;padding:11px 44px 11px 42px}.field .ic{position:absolute;left:13px;top:50%;transform:translateY(-50%)}
+.field .eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:0;font-size:18px;margin:0;padding:6px}
+.cal .ch{display:flex;justify-content:space-between;align-items:center}.cg{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center}
+.cd{border:2px solid var(--l);border-radius:8px;padding:4px 0;min-height:46px;background:#f6fbff;cursor:pointer;font-size:14px}.cd small{display:block;font-size:10px}
+.cd.off{background:#f1f4f7;color:#aab;border-color:#f1f4f7;cursor:default}.cd.full{background:#e3e8ee;color:#889;cursor:not-allowed}.cd.on{border-color:var(--pd);background:var(--p)}
+.slip{border:2px dashed var(--p);border-radius:12px;padding:14px;background:#f2f9ff;margin-bottom:8px}.slip b.n{font-size:44px;color:#2b79b8;display:block}
+table{width:100%;border-collapse:collapse}td,th{padding:8px;border-bottom:1px solid var(--l);text-align:left}#msg{padding:10px;border-radius:8px;margin-bottom:12px;display:none;border:1px solid #7cc0f5}
+@media(max-width:600px){.pick{grid-template-columns:1fr}}
+</style></head><body><header><b><img src=/logo.png class=lg alt="">ICCT Colleges</b><span id=who></span></header>
+<main><div id=msg></div><div id=app></div></main><script>
+const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"]/g,c=>'&#'+c.charCodeAt(0)+';');
+let T=sessionStorage.t,U=JSON.parse(sessionStorage.u||'null'),sel={},resId=null,AR=null,AV='',DAYS=[],cm={y:0,m:0};
+const REQ={get:'Form 137 and PSA birth certificate',update:'Current prospectus and SOG (Summary of Grades)'};
+const TY={update:'Evaluation/Updating of Prospectus',get:'Releasing of Prospectus'};
+const fd=d=>new Date(d+'T00:00:00Z').toLocaleDateString('en',{weekday:'long',month:'long',day:'numeric',year:'numeric',timeZone:'UTC'});
+async function api(p,m='GET',b){const r=await fetch('/api/'+p,{method:m,headers:{'Content-Type':'application/json',Authorization:T||''},body:b&&JSON.stringify(b)});const j=await r.json();if(!r.ok)throw j.error;return j}
+function say(t,ok){const m=$('#msg');m.textContent=t;m.style.display='block';m.style.background=ok?'#c5e5fc':'#eef7ff'}
+const go=async f=>{try{await f()}catch(e){say(e)}};
+const F=(id,ic,ph,ty='text')=>`<label class=field><span class=ic>${ic}</span><input id=${id} type=${ty} placeholder="${ph}" autocomplete=off>${ty=='password'?`<button type=button class=eye onclick="eye('${id}',this)" title="Show / hide password">👁️</button>`:''}</label>`;
+const eye=(id,b)=>{const i=$('#'+id);i.type=i.type=='password'?'text':'password';b.textContent=i.type=='password'?'👁️':'🙈'};
+document.addEventListener('keydown',e=>{if(e.key=='Enter'&&e.target.tagName=='INPUT'){const b=e.target.closest('.card')?.querySelector('button:not(.s):not(.eye)');b&&b.click()}});
+function render(){document.body.classList.toggle('auth',!U);$('#who').innerHTML=U?esc(U.name)+' ('+U.role+') <button class=s onclick="logout()">Log out</button>':'';
+ if(!U)return authView();go(U.role=='student'?studentView:staffView)}
+function authView(){const B='<button class=s onclick="AR=null;AV=\'\';authView()">← Back</button>';
+ if(!AR)return $('#app').innerHTML=`<div class="card hero"><img src=/logo.png alt="ICCT logo" style="width:120px;height:120px"><h1>ICCT Colleges</h1><p>Cainta (Main) Campus</p><h3>Who are you?</h3><div class=pick><div class=role onclick="AR='student';authView()"><div style="font-size:48px">🎓</div><h3>Student</h3><small>Book an appointment and get your slot number</small></div><div class=role onclick="AR='admin';authView()"><div style="font-size:48px">🗂️</div><h3>Admin / Staff</h3><small>Manage the queue and reports</small></div></div></div>`;
+ const st=AR=='student';
+ if(AV=='forgot')return $('#app').innerHTML=B+`<div class=card><h3>🔑 Forgot password</h3><p>Enter your student number. We will email a 6-digit code to your registered email.</p>${F('fl','🪪','Student number')}<button onclick="sendCode()">Send code</button></div>`;
+ if(AV=='reset')return $('#app').innerHTML=B+`<div class=card><h3>🔑 Reset password</h3><p>Check your email (and Spam) for the code.</p>${F('fl','🪪','Student number')}${F('fc','✉️','6-digit code')}${F('fp','🔒','New password (min 6)','password')}<button onclick="doReset()">Reset password</button></div>`;
+ $('#app').innerHTML=B+`<div class=card><h3>${st?'🎓 Student':'🗂️ Admin / Staff'} Log in</h3>${F('li','👤',st?'Student number':'Admin or staff ID')}${F('lp','🔒','Password','password')}<button onclick="login()">Log in</button>${st?' <a href=# onclick="AV=\'forgot\';authView();return false">Forgot password?</a>':''}</div>`+
+ (st?`<div class=card><h3>📝 New student? Register</h3>${F('rs','🪪','Student number')}${F('rn','👤','Full name')}${F('re','✉️','Email (for confirmation)')}${F('rp','🔒','Password (min 6)','password')}<button onclick="reg()">Register</button></div>`:'')}
+const login=()=>go(async()=>{try{const r=await api('login','POST',{id:$('#li').value,password:$('#lp').value});
+ if((AR=='student')!=(r.user.role=='student'))throw AR=='student'?'This is an Admin/Staff account. Go back and choose Admin / Staff.':'This is a Student account. Go back and choose Student.';
+ T=r.token;U=r.user;sessionStorage.t=T;sessionStorage.u=JSON.stringify(U);$('#msg').style.display='none';render()}
+ catch(e){$('#li').value=$('#lp').value='';$('#lp').type='password';$('#li').focus();throw e}});
+const reg=()=>go(async()=>{await api('register','POST',{student_no:$('#rs').value,name:$('#rn').value,email:$('#re').value,password:$('#rp').value});['rs','rn','re','rp'].forEach(i=>$('#'+i).value='');say('Registered! You can now log in.',1)});
+const sendCode=()=>go(async()=>{const l=$('#fl').value;await api('forgot','POST',{login:l});AV='reset';authView();$('#fl').value=l;say('If that student number is registered, a 6-digit code was sent to its email. Check Spam too.',1)});
+const doReset=()=>go(async()=>{await api('reset','POST',{login:$('#fl').value,code:$('#fc').value,password:$('#fp').value});AV='';authView();say('Password changed! You can now log in.',1)});
+const logout=()=>{sessionStorage.clear();T=U=AR=null;AV='';$('#msg').style.display='none';render()};
+async function studentView(){const[s,my]=await Promise.all([api('slots'),api('my')]),act=my.find(a=>a.status=='booked');sel={};DAYS=s.days;
+ const f=(DAYS[0]||{d:'2026-01-01'}).d;cm={y:+f.slice(0,4),m:+f.slice(5,7)-1};
+ $('#app').innerHTML=(act?`<div class=card><h3>🎫 Your appointment slip</h3><div class=slip><b class=n>#${act.serial}</b>${esc(U.name)} · ${esc(U.login)}<br>${fd(act.d)} at ${act.t} · ${TY[act.type]||act.type}<br><small>Bring: ${REQ[act.type]}</small></div><button class=s onclick="resId=${act.id};render()">Reschedule</button><button class=s onclick="cancel(${act.id})">Cancel</button></div>`:'')+
+ (!act||resId?`<div class=card><h3>📅 ${resId?'Pick a new date':'Book an appointment'}</h3>${resId?'<button class=s onclick="resId=null;render()">← Back to dashboard</button>':''}<p>Open every <b>Tuesday</b> and <b>Friday</b>. Slots are limited per day.</p>${resId?'':`<select id=ty onchange="rq()"><option value=update>${TY.update}</option><option value=get>${TY.get}</option></select><p id=rq></p>`}<div id=cal></div>🕘 <select id=tm>${s.times.map(t=>`<option>${t}</option>`).join('')}</select><button onclick="doBook()">Confirm</button></div>`:'')+
+ `<div class=card><h3>📜 History</h3><table>${my.map(a=>`<tr><td>#${a.serial}<td>${a.d} ${a.t}<td>${TY[a.type]||a.type}<td>${a.status}</tr>`).join('')||'<tr><td>No appointments yet.'}</table></div>`;if($('#rq'))rq();drawCal()}
+const rq=()=>$('#rq').textContent='Bring: '+REQ[$('#ty').value];
+function drawCal(){const c=$('#cal');if(!c)return;const M=Object.fromEntries(DAYS.map(d=>[d.d,d])),{y,m}=cm,first=new Date(Date.UTC(y,m,1)),n=new Date(Date.UTC(y,m+1,0)).getUTCDate(),p=x=>String(x).padStart(2,'0');
+ let h=`<div class=cal><div class=ch><button class=s onclick="mv(-1)">‹</button><b>${first.toLocaleString('en',{month:'long',year:'numeric',timeZone:'UTC'})}</b><button class=s onclick="mv(1)">›</button></div><div class=cg>`+['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(x=>`<small><b>${x}</b></small>`).join('');
+ for(let i=0;i<first.getUTCDay();i++)h+='<i></i>';
+ for(let d=1;d<=n;d++){const k=`${y}-${p(m+1)}-${p(d)}`,o=M[k];h+=o?`<div class="cd ${o.left?'':'full'} ${sel.d==k?'on':''}" onclick="pick('${k}',${o.left})"><b>${d}</b><small>${o.left?o.left+' left':'FULL'}</small></div>`:`<div class="cd off"><b>${d}</b></div>`}
+ c.innerHTML=h+'</div></div>'}
+function mv(k){const a=DAYS[0].d,z=DAYS[DAYS.length-1].d,ym=x=>+x.slice(0,4)*12+ +x.slice(5,7)-1,n=cm.y*12+cm.m+k;if(n<ym(a)||n>ym(z))return;cm={y:Math.floor(n/12),m:n%12};drawCal()}
+function pick(d,left){if(!left)return say('That date is already full. Please choose another date.');sel.d=d;drawCal()}
+const doBook=()=>go(async()=>{if(!sel.d)throw 'Please pick a date on the calendar first.';const b={date:sel.d,time:$('#tm').value,type:resId?'':$('#ty').value};
+ const r=await api(resId?'reschedule/'+resId:'book','POST',b);resId=null;say('Booked! Your slot number is #'+r.serial+'. A confirmation email was sent.',1);studentView()});
+const cancel=id=>go(async()=>{if(!confirm('Cancel this appointment?'))return;await api('cancel/'+id,'POST');say('Appointment cancelled.',1);studentView()});
+async function staffView(){$('#app').innerHTML=`<div class=card><h3>📋 Dashboard</h3><input type=date id=qd value="${new Date().toLocaleDateString('en-CA')}" onchange="loadQ()"><div id=sm></div><div id=ql></div></div>`+
+ (U.role=='admin'?`<div class=card><h3>👥 Add staff account</h3>${F('nl','👤','Login')}${F('nn','🪪','Name')}${F('np','🔒','Password (min 6)','password')}<button onclick="addStaff()">Create</button></div>`:'');
+ loadQ()}
+const loadQ=()=>go(async()=>{const r=(await api('queue?date='+$('#qd').value)).filter(a=>a.status=='booked'),c=t=>r.filter(a=>a.type==t).length;
+ $('#sm').innerHTML=`<p><b>${r.length}</b> booked<br>${TY.update}: <b>${c('update')}</b><br>${TY.get}: <b>${c('get')}</b></p>`;
+ $('#ql').innerHTML=r.length?`<table><tr><th>#<th>Time<th>Student<th>Request<th>To bring</tr>${r.map(a=>`<tr><td><b>${a.serial}</b><td>${a.t}<td>${esc(a.name)}<br><small>${esc(a.login)}</small><td>${esc(TY[a.type]||a.type)}<td><small>${esc(REQ[a.type]||'')}</small></tr>`).join('')}</table>`:'<p>No appointments for this date. (Open days: Tuesday and Friday.)</p>'});
+const addStaff=()=>go(async()=>{await api('staff','POST',{login:$('#nl').value,name:$('#nn').value,password:$('#np').value});['nl','nn','np'].forEach(i=>$('#'+i).value='');say('Staff account created.',1)});
+document.addEventListener('click',e=>{if(e.target.closest('button,a,.role,.cd'))$('#msg').style.display='none'},true);
+render();</script></body></html>
