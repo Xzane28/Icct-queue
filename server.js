@@ -5,7 +5,7 @@ const DB={host:E.DB_HOST||'localhost',port:+E.DB_PORT||3306,user:E.DB_USER||'roo
 if(E.DB_SSL)DB.ssl={minVersion:'TLSv1.2',rejectUnauthorized:true}; // needed by online databases such as TiDB Cloud
 const SMTP={user:E.GMAIL_USER||'',pass:E.GMAIL_APP_PASSWORD||''}; // local PC only: Gmail + App Password
 const BREVO=E.BREVO_API_KEY,FROM=E.MAIL_FROM||SMTP.user; // online hosting: send email through Brevo's web API
-const DEFAULT_MAX=20,TIMES=['09:00','10:00','11:00','13:00','14:00','15:00'];
+const DEFAULT_MAX=+E.MAX_SLOTS||30,TIMES=['09:00','10:00','11:00','13:00','14:00','15:00'];
 const REQ={get:'Form 137 and PSA birth certificate',update:'Current prospectus and SOG (Summary of Grades)'};
 let pool;const tokens=new Map();
 const hash=(p,s=crypto.randomBytes(8).toString('hex'))=>s+':'+crypto.scryptSync(p,s,32).toString('hex');
@@ -15,7 +15,8 @@ if(BREVO)console.log('Email via Brevo API:',FROM);else if(!tx)console.log('WARNI
 async function sendBrevo(to,subject,text){try{const r=await fetch('https://api.brevo.com/v3/smtp/email',{method:'POST',headers:{'api-key':BREVO,'content-type':'application/json'},body:JSON.stringify({sender:{name:'ICCT Queue',email:FROM},to:[{email:to}],subject,textContent:text})});if(!r.ok)console.log('Brevo failed:',r.status,await r.text())}catch(e){console.log('Brevo failed:',e.message)}}
 async function mail(to,subject,text){console.log('EMAIL ->',to,'|',subject);if(BREVO&&to)return sendBrevo(to,subject,text);if(!tx||!to)return;try{await tx.sendMail({from:'ICCT Queue <'+SMTP.user+'>',to,subject,text})}catch(e){console.log('Email failed:',e.message)}}
 const q=async(s,p)=>(await pool.query(s,p))[0];
-const dates=()=>{const a=[];for(let i=0;a.length<14;i++){const d=new Date(Date.now()+i*864e5),w=d.getDay();if(w&&w<6)a.push(d.toLocaleDateString('en-CA'))}return a};
+const mnl=t=>new Date(t).toLocaleDateString('en-CA',{timeZone:'Asia/Manila'});
+const dates=()=>{const a=[];for(let i=1;i<=90;i++){const d=mnl(Date.now()+i*864e5),w=new Date(d+'T00:00:00Z').getUTCDay();if(w==2||w==5)a.push(d)}return a}; // open only Tuesdays and Fridays
 const auth=(...roles)=>(req,res,next)=>{const u=tokens.get(req.headers.authorization);if(!u||(roles.length&&!roles.includes(u.role)))return res.status(401).json({error:'Not allowed. Please log in.'});req.u=u;next()};
 const wrap=f=>async(req,res)=>{try{res.json(await f(req))}catch(e){res.status(400).json({error:e.message||String(e)})}};
 async function book(u,d,t,type,oldId){
@@ -55,13 +56,21 @@ app.post('/api/schedule',auth('admin'),wrap(async r=>{const m=+r.body.max;if(!r.
 app.get('/api/report',auth('admin'),wrap(()=>q("SELECT d,COUNT(*) total,SUM(status='served') served,SUM(status='missed') missed,SUM(status='cancelled') cancelled FROM appointments GROUP BY d ORDER BY d DESC LIMIT 60")));
 app.post('/api/staff',auth('admin'),wrap(async r=>{const{login,name,password}=r.body;if(!login||!name||(password||'').length<6)throw 'Fill in all fields (password min 6).';
  try{await q('INSERT INTO users(role,login,name,email,pw) VALUES("staff",?,?,"",?)',[login,name,hash(password)])}catch{throw 'Login already exists.'}return{ok:1}}));
+const codes=new Map();
+app.post('/api/forgot',wrap(async r=>{const[u]=await q('SELECT * FROM users WHERE login=? AND email<>""',[r.body.login||'']);
+ if(u){const c=String(crypto.randomInt(100000,1000000));codes.set(u.login,{h:hash(c),exp:Date.now()+9e5,n:0});mail(u.email,'ICCT Queue password reset code',`Hi ${u.name},\n\nYour password reset code is ${c}. It expires in 15 minutes.\nIf you did not ask for this, ignore this email.`)}
+ return{ok:1}}));
+app.post('/api/reset',wrap(async r=>{const{login,code,password}=r.body,k=codes.get(login||'');
+ if((password||'').length<6)throw 'Password must be at least 6 characters.';
+ if(!k||k.exp<Date.now()||++k.n>5||!check(String(code||''),k.h))throw 'Invalid or expired code.';
+ codes.delete(login);await q('UPDATE users SET pw=? WHERE login=?',[hash(password),login]);return{ok:1}}));
 (async()=>{try{const c=await mysql.createConnection({...DB,database:undefined});await c.query('CREATE DATABASE IF NOT EXISTS '+DB.database);await c.end()}catch(e){console.log('Skipped CREATE DATABASE:',e.message)}
  pool=mysql.createPool({...DB,dateStrings:true});
  await q('CREATE TABLE IF NOT EXISTS users(id INT AUTO_INCREMENT PRIMARY KEY,role VARCHAR(10),login VARCHAR(40) UNIQUE,name VARCHAR(80),email VARCHAR(80),pw VARCHAR(200))');
  await q('CREATE TABLE IF NOT EXISTS schedules(d DATE PRIMARY KEY,max_slots INT)');
  await q("CREATE TABLE IF NOT EXISTS appointments(id INT AUTO_INCREMENT PRIMARY KEY,user_id INT,d DATE,t VARCHAR(5),type VARCHAR(10),serial INT,status VARCHAR(12) DEFAULT 'booked',reminded TINYINT DEFAULT 0,UNIQUE(d,serial))");
- for(const[r,l,n]of[['admin','admin','Administrator'],['staff','staff','Registrar Staff']])await q('INSERT IGNORE INTO users(role,login,name,email,pw) VALUES(?,?,?,"",?)',[r,l,n,hash(E[l.toUpperCase()+'_PASSWORD']||l+'123')]);
- setInterval(async()=>{const d=new Date(Date.now()+864e5).toLocaleDateString('en-CA');
+ for(const[r,l,n]of[['admin','admin','Administrator'],['staff','staff','Registrar Staff']]){await q('INSERT IGNORE INTO users(role,login,name,email,pw) VALUES(?,?,?,"",?)',[r,l,n,hash(E[l.toUpperCase()+'_PASSWORD']||l+'123')]);const P=E[l.toUpperCase()+'_PASSWORD'];if(P)await q('UPDATE users SET pw=? WHERE login=?',[hash(P),l])}
+ setInterval(async()=>{const d=mnl(Date.now()+864e5);
   for(const a of await q("SELECT a.*,u.email,u.name,u.login FROM appointments a JOIN users u ON u.id=a.user_id WHERE a.d=? AND a.status='booked' AND a.reminded=0",[d])){
    await mail(a.email,'Reminder: appointment tomorrow - Slot #'+a.serial,`Hi ${a.name}, reminder: ${a.d} ${a.t}, slot #${a.serial}. Bring: ${REQ[a.type]}`);await q('UPDATE appointments SET reminded=1 WHERE id=?',[a.id])}},36e5);
  app.listen(E.PORT||3000,()=>console.log('Running on port '+(E.PORT||3000)))})().catch(e=>{console.error('Startup failed (is MySQL running in XAMPP?):',e.message)});
