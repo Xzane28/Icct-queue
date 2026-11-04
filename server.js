@@ -28,7 +28,7 @@ async function book(u,d,t,type,oldId){
   if(ex.n)throw 'You already have an active appointment. Cancel or reschedule it first.';
   await c.query('INSERT IGNORE INTO schedules(d,max_slots) VALUES(?,?)',[d,DEFAULT_MAX]);
   const[[s]]=await c.query('SELECT max_slots FROM schedules WHERE d=? FOR UPDATE',[d]);
-  const[[a]]=await c.query("SELECT COALESCE(MAX(serial),0) mx,COALESCE(SUM(status NOT IN('cancelled','rescheduled')),0) n FROM appointments WHERE d=?",[d]);
+  const[[a]]=await c.query("SELECT COALESCE(MAX(serial),0) mx,COALESCE(SUM(status NOT IN('cancelled','rescheduled','closed')),0) n FROM appointments WHERE d=?",[d]);
   if(+a.n>=s.max_slots)throw 'That date is already full. Please choose another date.';
   const serial=+a.mx+1;
   const[r]=await c.query('INSERT INTO appointments(user_id,d,t,type,serial) VALUES(?,?,?,?,?)',[u.id,d,t,type,serial]);
@@ -44,7 +44,7 @@ app.post('/api/login',async(req,res)=>{const[u]=await q('SELECT * FROM users WHE
  if(!u||!check(req.body.password||'',u.pw))return res.status(401).json({error:'Wrong ID or password.'});
  const t=crypto.randomBytes(16).toString('hex'),user={id:u.id,role:u.role,login:u.login,name:u.name,email:u.email};tokens.set(t,user);res.json({token:t,user})});
 app.get('/api/slots',auth(),wrap(async()=>{const ds=dates(),s=await q('SELECT d,max_slots FROM schedules WHERE d IN (?)',[ds]),
- c=await q("SELECT d,COUNT(*) n FROM appointments WHERE d IN (?) AND status NOT IN('cancelled','rescheduled') GROUP BY d",[ds]);
+ c=await q("SELECT d,COUNT(*) n FROM appointments WHERE d IN (?) AND status NOT IN('cancelled','rescheduled','closed') GROUP BY d",[ds]);
  return{times:TIMES,days:ds.map(d=>{const m=(s.find(x=>x.d==d)||{max_slots:DEFAULT_MAX}).max_slots,n=+(c.find(x=>x.d==d)||{}).n||0;return{d,max:m,left:Math.max(0,m-n)}})}}));
 app.post('/api/book',auth('student'),wrap(r=>book(r.u,r.body.date,r.body.time,r.body.type)));
 app.post('/api/reschedule/:id',auth('student'),wrap(async r=>{const[o]=await q('SELECT type FROM appointments WHERE id=? AND user_id=?',[r.params.id,r.u.id]);if(!o)throw 'Not found';return book(r.u,r.body.date,r.body.time,o.type,r.params.id)}));
@@ -52,7 +52,12 @@ app.post('/api/cancel/:id',auth('student'),wrap(async r=>{await q("UPDATE appoin
 app.get('/api/my',auth('student'),wrap(r=>q('SELECT * FROM appointments WHERE user_id=? ORDER BY id DESC',[r.u.id])));
 app.get('/api/queue',auth('staff','admin'),wrap(r=>q('SELECT a.id,a.serial,a.t,a.type,a.status,u.name,u.login FROM appointments a JOIN users u ON u.id=a.user_id WHERE a.d=? ORDER BY a.serial',[r.query.date])));
 app.post('/api/status/:id',auth('staff','admin'),wrap(async r=>{if(!['served','missed','rescheduled'].includes(r.body.status))throw 'Bad status';await q('UPDATE appointments SET status=? WHERE id=?',[r.body.status,r.params.id]);return{ok:1}}));
-app.post('/api/schedule',auth('admin'),wrap(async r=>{const m=+r.body.max;if(!r.body.date||!(m>=0))throw 'Enter a date and max slots.';await q('INSERT INTO schedules(d,max_slots) VALUES(?,?) ON DUPLICATE KEY UPDATE max_slots=?',[r.body.date,m,m]);return{ok:1}}));
+app.post('/api/schedule',auth('admin'),wrap(async r=>{const m=+r.body.max,d=r.body.date;if(!d||!(m>=0))throw 'Enter a date and max slots.';await q('INSERT INTO schedules(d,max_slots) VALUES(?,?) ON DUPLICATE KEY UPDATE max_slots=?',[d,m,m]);
+ let n=0; // closing a day (max 0): cancel everyone booked that day and email them to rebook
+ if(m==0){const list=await q("SELECT a.t,a.serial,u.email,u.name FROM appointments a JOIN users u ON u.id=a.user_id WHERE a.d=? AND a.status='booked'",[d]);n=list.length;
+  if(n){await q("UPDATE appointments SET status='closed' WHERE d=? AND status='booked'",[d]);
+   (async()=>{for(const a of list)await mail(a.email,'Appointment cancelled - please book a new schedule',`Hi ${a.name},\n\nWe are sorry. Your prospectus appointment on ${d} at ${a.t} (slot #${a.serial}) was cancelled because the registrar is closed on that day.\n\nPlease log in to https://icct-queue.onrender.com and book a new schedule.\n\nThank you for your understanding.`)})()}}
+ return{ok:1,cancelled:n}}));
 app.get('/api/report',auth('admin'),wrap(()=>q("SELECT d,COUNT(*) total,SUM(status='served') served,SUM(status='missed') missed,SUM(status='cancelled') cancelled FROM appointments GROUP BY d ORDER BY d DESC LIMIT 60")));
 app.post('/api/staff',auth('admin'),wrap(async r=>{const{login,name,password}=r.body;if(!login||!name||(password||'').length<6)throw 'Fill in all fields (password min 6).';
  try{await q('INSERT INTO users(role,login,name,email,pw) VALUES("staff",?,?,"",?)',[login,name,hash(password)])}catch{throw 'Login already exists.'}return{ok:1}}));
