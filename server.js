@@ -5,7 +5,7 @@ const DB={host:E.DB_HOST||'localhost',port:+E.DB_PORT||3306,user:E.DB_USER||'roo
 if(E.DB_SSL)DB.ssl={minVersion:'TLSv1.2',rejectUnauthorized:true}; // needed by online databases such as TiDB Cloud
 const SMTP={user:E.GMAIL_USER||'',pass:E.GMAIL_APP_PASSWORD||''}; // local PC only: Gmail + App Password
 const BREVO=E.BREVO_API_KEY,FROM=E.MAIL_FROM||SMTP.user; // online hosting: send email through Brevo's web API
-const DEFAULT_MAX=+E.MAX_SLOTS||30,TIMES=['09:00','10:00','11:00','13:00','14:00','15:00'];
+const DEFAULT_MAX=+E.MAX_SLOTS||30,TIMES=['09:00','10:00','11:00','13:00','14:00','15:00','16:00'];
 const REQ={get:'Form 137 and PSA birth certificate',update:'Current prospectus and SOG (Summary of Grades)'};
 let pool;const tokens=new Map();
 const hash=(p,s=crypto.randomBytes(8).toString('hex'))=>s+':'+crypto.scryptSync(p,s,32).toString('hex');
@@ -16,7 +16,7 @@ async function sendBrevo(to,subject,text){try{const r=await fetch('https://api.b
 async function mail(to,subject,text){console.log('EMAIL ->',to,'|',subject);if(BREVO&&to)return sendBrevo(to,subject,text);if(!tx||!to)return;try{await tx.sendMail({from:'ICCT Queue <'+SMTP.user+'>',to,subject,text})}catch(e){console.log('Email failed:',e.message)}}
 const q=async(s,p)=>(await pool.query(s,p))[0];
 const mnl=t=>new Date(t).toLocaleDateString('en-CA',{timeZone:'Asia/Manila'});
-const dates=()=>{const a=[];for(let i=1;i<=90;i++){const d=mnl(Date.now()+i*864e5),w=new Date(d+'T00:00:00Z').getUTCDay();if(w==2||w==5)a.push(d)}return a}; // open only Tuesdays and Fridays
+const dates=()=>{const a=[];for(let i=1;i<=90;i++){const d=mnl(Date.now()+i*864e5),w=new Date(d+'T00:00:00Z').getUTCDay();if(w>=1&&w<=6)a.push(d)}return a}; // open Monday to Saturday
 const auth=(...roles)=>(req,res,next)=>{const u=tokens.get(req.headers.authorization);if(!u||(roles.length&&!roles.includes(u.role)))return res.status(401).json({error:'Not allowed. Please log in.'});req.u=u;next()};
 const wrap=f=>async(req,res)=>{try{res.json(await f(req))}catch(e){res.status(400).json({error:e.message||String(e)})}};
 async function book(u,d,t,type,oldId){
@@ -61,6 +61,10 @@ app.post('/api/schedule',auth('admin'),wrap(async r=>{const m=+r.body.max,d=r.bo
 app.get('/api/report',auth('admin'),wrap(()=>q("SELECT d,COUNT(*) total,SUM(status='served') served,SUM(status='missed') missed,SUM(status='cancelled') cancelled FROM appointments GROUP BY d ORDER BY d DESC LIMIT 60")));
 app.post('/api/staff',auth('admin'),wrap(async r=>{const{login,name,password}=r.body;if(!login||!name||(password||'').length<6)throw 'Fill in all fields (password min 6).';
  try{await q('INSERT INTO users(role,login,name,email,pw) VALUES("staff",?,?,"",?)',[login,name,hash(password)])}catch{throw 'Login already exists.'}return{ok:1}}));
+app.get('/api/students',auth('admin'),wrap(()=>q("SELECT u.login,u.name,u.email,(SELECT CONCAT(a.d,' ',a.t) FROM appointments a WHERE a.user_id=u.id AND a.status='booked' ORDER BY a.d LIMIT 1) booked FROM users u WHERE u.role='student' ORDER BY u.id DESC")));
+app.get('/api/holidays',auth(),wrap(()=>q('SELECT d,note FROM holidays ORDER BY d')));
+app.post('/api/holiday',auth('admin'),wrap(async r=>{const d=String(r.body.date||''),n=String(r.body.note||'').trim().slice(0,120);if(!/^\d{4}-\d{2}-\d{2}$/.test(d)||!n)throw 'Enter a date and a note.';await q('INSERT INTO holidays(d,note) VALUES(?,?) ON DUPLICATE KEY UPDATE note=?',[d,n,n]);return{ok:1}}));
+app.post('/api/holiday/delete',auth('admin'),wrap(async r=>{await q('DELETE FROM holidays WHERE d=?',[String(r.body.date||'')]);return{ok:1}}));
 const codes=new Map();
 app.post('/api/forgot',wrap(async r=>{const[u]=await q('SELECT * FROM users WHERE login=? AND email<>""',[r.body.login||'']);
  if(u){const c=String(crypto.randomInt(100000,1000000));codes.set(u.login,{h:hash(c),exp:Date.now()+9e5,n:0});mail(u.email,'ICCT Queue password reset code',`Hi ${u.name},\n\nYour password reset code is ${c}. It expires in 15 minutes.\nIf you did not ask for this, ignore this email.`)}
@@ -73,6 +77,9 @@ app.post('/api/reset',wrap(async r=>{const{login,code,password}=r.body,k=codes.g
  pool=mysql.createPool({...DB,dateStrings:true});
  await q('CREATE TABLE IF NOT EXISTS users(id INT AUTO_INCREMENT PRIMARY KEY,role VARCHAR(10),login VARCHAR(40) UNIQUE,name VARCHAR(80),email VARCHAR(80),pw VARCHAR(200))');
  await q('CREATE TABLE IF NOT EXISTS schedules(d DATE PRIMARY KEY,max_slots INT)');
+ const hadHol=(await q("SHOW TABLES LIKE 'holidays'")).length; // seed the Philippine 2026 holidays only the first time
+ await q('CREATE TABLE IF NOT EXISTS holidays(d DATE PRIMARY KEY,note VARCHAR(120))');
+ if(!hadHol)for(const[d,n]of [["2026-01-01", "New Year's Day (Regular Holiday)"], ["2026-02-17", "Chinese New Year (Special Non-Working Day)"], ["2026-04-02", "Maundy Thursday (Regular Holiday)"], ["2026-04-03", "Good Friday (Regular Holiday)"], ["2026-04-04", "Black Saturday (Special Non-Working Day)"], ["2026-04-09", "Araw ng Kagitingan (Regular Holiday)"], ["2026-05-01", "Labor Day (Regular Holiday)"], ["2026-06-12", "Independence Day (Regular Holiday)"], ["2026-08-21", "Ninoy Aquino Day (Special Non-Working Day)"], ["2026-08-31", "National Heroes Day (Regular Holiday)"], ["2026-11-01", "All Saints' Day (Special Non-Working Day)"], ["2026-11-02", "All Souls' Day (Special Non-Working Day)"], ["2026-11-30", "Bonifacio Day (Regular Holiday)"], ["2026-12-08", "Feast of the Immaculate Conception (Special Non-Working Day)"], ["2026-12-24", "Christmas Eve (Special Non-Working Day)"], ["2026-12-25", "Christmas Day (Regular Holiday)"], ["2026-12-30", "Rizal Day (Regular Holiday)"], ["2026-12-31", "Last Day of the Year (Special Non-Working Day)"]])await q('INSERT IGNORE INTO holidays(d,note) VALUES(?,?)',[d,n]);
  await q("CREATE TABLE IF NOT EXISTS appointments(id INT AUTO_INCREMENT PRIMARY KEY,user_id INT,d DATE,t VARCHAR(5),type VARCHAR(10),serial INT,status VARCHAR(12) DEFAULT 'booked',reminded TINYINT DEFAULT 0,UNIQUE(d,serial))");
  for(const[r,l,n]of[['admin','admin','Administrator'],['staff','staff','Registrar Staff']]){await q('INSERT IGNORE INTO users(role,login,name,email,pw) VALUES(?,?,?,"",?)',[r,l,n,hash(E[l.toUpperCase()+'_PASSWORD']||l+'123')]);const P=E[l.toUpperCase()+'_PASSWORD'];if(P)await q('UPDATE users SET pw=? WHERE login=?',[hash(P),l])}
  setInterval(async()=>{const d=mnl(Date.now()+864e5);
